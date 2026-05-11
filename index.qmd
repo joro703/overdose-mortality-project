@@ -1,5 +1,4 @@
 ---
-title: "" 
 bibliography: references.bib 
 csl: apa.csl 
 ---
