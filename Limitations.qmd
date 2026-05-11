@@ -1,0 +1,9 @@
+---
+title: "Limitations"
+---
+
+This study relied on state-level aggregate data, limiting the scope of the conclusions we can draw. Socioeconomic conditions within states are far from homogeneous, varying widely from city to city, and even neighborhood to neighborhood, and we cannot assume that relationships that exist at the state level can be generalized to its sublevels. For example, a positive relationship between median household income and overdose death rates at the state level does not imply that individuals with higher incomes are at greater risk of overdose deaths.
+
+Another limitation was the availability and completeness of the data, or lack thereof. The age group consisting of children age 15 and younger were excluded from the analysis because almost all of the overdose data for this age group has been suppressed. Many states were also missing from the Fatal Drug Overdose Data, which only contained information from the years 2020-2024, during which the COVID-19 pandemic disrupted the collection of socioeconomic information. Thus, the reduced number of observations may have affected model stability.
+
+Additionally, residual plots and Q-Q plots for the models (shown on the "Residual Plots" page) reveal there may have been some violations of the assumptions for linear regression, namely linearity of the data, homoscedasticity, and normality of the residuals. These violations do not appear to be catastrophic, but conclusions from the models, especially for heroin, prescription opioids, and benzodiazepines, should be interpreted with caution.

@@ -1,0 +1,91 @@
+---
+title: "Research Question 3"
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+# load packages used
+
+library(readxl)
+library(tidyverse)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(car)
+library(knitr)
+library(patchwork)
+library(leaps)
+
+# load data
+od_data = read_excel("overdose_data.xlsx")
+
+# change state and year to factor variables
+od_data = od_data %>%
+  mutate(
+    state = factor(state),
+    year = factor(year),
+    med_income = med_income/1000
+  )
+
+# change all 9999 values to NA
+od_data = od_data %>%
+  mutate(across(where(is.numeric), ~ na_if(., 9999)))
+
+
+```
+
+# Are there significant differences in overdose death rate between males and females?
+
+## Statistical Methods
+
+We perform a Welch two sample t-test to compare overall overdose death rates between males and females. We set the significance level at 0.05.
+
+## Results
+
+The mean overdose death rate for males is approximately 46.26, and the mean overdose death rate for females is approximately 19.49. The t-test indicates a statistically significant difference in means ($p<2.2e-16$) with a 95% confidence interval of (23.03, 30.51).
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide', include=FALSE}
+
+# data cleaning
+gender_data = od_data %>%
+  select(male_rate, female_rate) %>%
+  drop_na()
+
+
+# do males differ from females t-test
+t_test_gender = t.test(gender_data$male_rate,
+                       gender_data$female_rate,
+                       paired = FALSE)
+
+t_test_gender
+colMeans(gender_data)
+
+```
+
+```{r, echo=FALSE}
+
+gender_long = od_data %>%
+  select(male_rate, female_rate) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Sex",
+               values_to = "Rate") %>%
+  drop_na()
+
+ggplot(gender_long, aes(x = Sex, y = Rate, fill = Sex)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c(
+    "female_rate" = "Female",
+    "male_rate" = "Male"
+  )) +
+  labs(
+    title = "Overdose Death Rates by Sex",
+    x = "Sex",
+    y = "Overdose Death Rate (per 100,000)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+## Analysis of Results
+
+Males had significantly higher average overdose death rates than females, with the mean male overdose rate over twice the female rate. Possible explanations for this disparity are that males may be more likely to engage in high-risk substance-use behaviors, use larger quantities of drugs, or be less likely to seek treatment for substance-use disorders or mental health conditions. Zero is well outside the confidence interval for the difference in means, which further suggests that sex is an important demographic factor associated with overdose mortality, as it points to a practically meaningful, not just statistically significant, difference between sexes.

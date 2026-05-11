@@ -1,0 +1,3147 @@
+---
+title: "R Code"
+---
+
+```{r, eval=FALSE}
+
+# load packages used
+
+library(readxl)
+library(tidyverse)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(car)
+library(knitr)
+library(patchwork)
+library(leaps)
+
+```
+
+# Data
+
+```{r, eval=FALSE}
+
+# load data
+od_data = read_excel("overdose_data.xlsx")
+
+glimpse(od_data)
+
+# change state and year to factor variables
+od_data = od_data %>%
+  mutate(
+    state = factor(state),
+    year = factor(year),
+    med_income = med_income/1000
+  )
+
+# change all 9999 values to NA
+od_data = od_data %>%
+  mutate(across(where(is.numeric), ~ na_if(., 9999)))
+
+```
+
+```{r, eval=FALSE}
+
+vars = data.frame(
+  Variable = c("`median_income` ", "`poverty`", "`hs_grad`", "`bachelors`"),
+  Description = c(
+    "median household income in thousands (USD)",
+    "percentage of the population below the national poverty threshold (i.e., poverty rate)",
+    "percentage of the population 18 years and over with a high school diploma or higher",
+    "percentage of the population 18 years and over with a bachelor's degree or higher"
+  )
+)
+
+kable(vars, col.names = NULL)
+```
+
+```{r, eval=FALSE}
+
+od_long = od_data %>%
+  select(alldrug_rate, heroin_rate, rxopioids_rate, 
+         cocaine_rate, meth_rate, benzodiazepines_rate) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "drug",
+    values_to = "rate"
+  )
+
+od_long$drug = factor(od_long$drug,
+  levels = c("alldrug_rate", "heroin_rate", "rxopioids_rate",
+             "cocaine_rate", "meth_rate", "benzodiazepines_rate"),
+  labels = c("All Drugs", "Heroin", "Prescription Opioids",
+             "Cocaine", "Methamphetamine", "Benzodiazepines")
+)
+
+ggplot(od_long, aes(x = rate)) +
+  geom_histogram(bins = 20, color = "black", fill = "lightsteelblue2") +
+  facet_wrap(~ drug, scales = "free_x") +
+  labs(
+    x = "Overdose Death Rate (per 100,000 persons)",
+    y = "Count",
+    title = "Distribution of Overdose Death Rates by Drug Type"
+  )
+
+```
+
+## All drugs:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = alldrug_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+       x = "Median Income (in thousands)",
+       y = "Overdose Death Rate",
+       title = "Overdose Deaths vs Median Income"
+     )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = alldrug_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+        x = "Poverty Rate",
+        y = "Overdose Death Rate",
+        title = "Overdose Deaths vs Poverty Rate"
+     )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(alldrug_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = alldrug_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, eval=FALSE}
+
+# correlation between alldrug_rate and poverty
+d = od_data %>%
+  select(alldrug_rate, poverty) %>%
+  na.omit()
+cor(d$alldrug_rate, d$poverty)
+
+```
+
+## Heroin:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = heroin_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+       x = "Median Income (in thousands)",
+       y = "Overdose Death Rate",
+       title = "Overdose Deaths vs Median Income"
+     )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = heroin_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+        x = "Poverty Rate",
+        y = "Overdose Death Rate",
+        title = "Overdose Deaths vs Poverty Rate"
+     )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(heroin_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = heroin_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+## Prescription Opioids:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(rxopioids_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+## Cocaine:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(cocaine_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, eval=FALSE}
+
+# compute correlation coefficient between cocaine_rate and bachelors
+c = od_data %>%
+    select(cocaine_rate, bachelors) %>%
+    drop_na()
+cor(c$cocaine_rate, c$bachelors)
+
+```
+
+## Methamphetamine:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(meth_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, eval=FALSE}
+
+# compute correlation coefficient between meth_rate and med_income
+m = od_data %>%
+    select(meth_rate, med_income) %>%
+    drop_na()
+cor(m$meth_rate, m$med_income)
+
+# compute correlation coefficient between meth_rate and poverty
+m = od_data %>%
+    select(meth_rate, poverty) %>%
+    drop_na()
+cor(m$meth_rate, m$poverty)
+
+```
+
+## Benzodiazepines:
+
+```{r, eval=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(benzodiazepines_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+# Research Question 1: How are median household income, poverty rate, and educational attainment related to drug overdose death rates in states, and do these relationships vary across different drugs?
+
+## Results
+
+### All drugs
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(alldrug_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(alldrug_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(alldrug_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$alldrug_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(alldrug_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+alldrug_model_hs = lm(alldrug_rate ~ med_income + poverty + hs_grad, 
+                       data = data_hs)
+
+summary(alldrug_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(alldrug_rate ~ med_income + poverty + hs_grad,
+             data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$alldrug_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+alldrug_hs.mse = min(mean.cv.errors)
+alldrug_hs.rmse = sqrt(alldrug_hs.mse)
+alldrug_hs.mae = mean(cv.mae)
+alldrug_hs.adjr2 = summary(alldrug_model_hs)$adj.r.squared
+
+cat("Test MSE =", alldrug_hs.mse, "\n")
+cat("Test RMSE =", alldrug_hs.rmse, "\n")
+cat("Test MAE =", alldrug_hs.mae, "\n")
+cat("Adjusted R-squared =", alldrug_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(alldrug_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(alldrug_rate ~ med_income + poverty + bachelors, 
+#                       data = data_bach, 
+#                       method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(alldrug_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$alldrug_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(alldrug_rate ~ med_income + poverty + bachelors, 
+                         data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+alldrug_model_bach = lm(alldrug_rate ~ poverty + bachelors, 
+                       data = data_bach)
+
+
+summary(alldrug_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(alldrug_rate ~ poverty + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$alldrug_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+alldrug_bach.mse = min(mean.cv.errors)
+alldrug_bach.rmse = sqrt(alldrug_bach.mse)
+alldrug_bach.mae = mean(cv.mae)
+alldrug_bach.adjr2 = summary(alldrug_model_bach)$adj.r.squared
+
+cat("Test MSE =", alldrug_bach.mse, "\n")
+cat("Test RMSE =", alldrug_bach.rmse, "\n")
+cat("Test MAE =", alldrug_bach.mae, "\n")
+cat("Adjusted R-squared =", alldrug_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(alldrug_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$alldrug_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+alldrug_hs.ridge.mse = mean((actual - ridge.pred)^2)
+alldrug_hs.ridge.rmse = sqrt(alldrug_hs.ridge.mse)
+alldrug_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+alldrug_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+                sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+alldrug_hs.ridge.adjr2 = 1 - ((1 - alldrug_hs.ridge.r2) * (n - 1)) /
+                    (n - p - 1)
+
+
+cat("MSE =", alldrug_hs.ridge.mse, "\n")
+cat("RMSE =", alldrug_hs.ridge.rmse, "\n")
+cat("MAE =", alldrug_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", alldrug_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(alldrug_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$alldrug_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.alldrug = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.alldrug = y
+
+# MSE, RMSE, MAE
+alldrug_bach.ridge.mse = mean((actual.alldrug - ridge.pred.alldrug)^2)
+alldrug_bach.ridge.rmse = sqrt(alldrug_bach.ridge.mse)
+alldrug_bach.ridge.mae = mean(abs(actual.alldrug - ridge.pred.alldrug))
+
+# R-squared
+alldrug_bach.ridge.r2 = 1 - sum((actual.alldrug - ridge.pred.alldrug)^2) /
+  sum((actual.alldrug - mean(actual.alldrug))^2)
+
+# Adjusted R-squared
+n = length(actual.alldrug)
+p = ncol(x)
+
+alldrug_bach.ridge.adjr2 = 1 - ((1 - alldrug_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", alldrug_bach.ridge.mse, "\n")
+cat("RMSE =", alldrug_bach.ridge.rmse, "\n")
+cat("MAE =", alldrug_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", alldrug_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+alldrug_baseline.pred = mean(od_data$alldrug_rate, na.rm = TRUE)
+
+alldrug_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+
+alldrug_baseline.rmse = sqrt(mean((od_data$alldrug_rate - alldrug_baseline.pred)^2,
+                          na.rm = TRUE))
+
+alldrug_baseline.mae = mean(abs(od_data$alldrug_rate - alldrug_baseline.pred.med),
+                    na.rm = TRUE)
+
+alldrug_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(alldrug_baseline.rmse,
+           alldrug_hs.rmse,
+           alldrug_bach.rmse,
+           alldrug_hs.ridge.rmse,
+           alldrug_bach.ridge.rmse),
+  
+  MAE = c(alldrug_baseline.mae,
+          alldrug_hs.mae,
+          alldrug_bach.mae,
+          alldrug_hs.ridge.mae,
+          alldrug_bach.ridge.mae),
+  
+  Adjusted_R2 = c(alldrug_baseline.adjr2,
+                  alldrug_hs.adjr2,
+                  alldrug_bach.adjr2,
+                  alldrug_hs.ridge.adjr2,
+                  alldrug_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = '"All Drugs" Model Comparison')
+
+```
+
+### Heroin
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(heroin_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(heroin_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(heroin_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$heroin_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(heroin_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+heroin_model_hs = lm(heroin_rate ~ med_income + poverty + hs_grad, 
+                      data = data_hs)
+
+summary(heroin_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(heroin_rate ~ med_income + poverty + hs_grad,
+           data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$heroin_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+heroin_hs.mse = min(mean.cv.errors)
+heroin_hs.rmse = sqrt(heroin_hs.mse)
+heroin_hs.mae = mean(cv.mae)
+heroin_hs.adjr2 = summary(heroin_model_hs)$adj.r.squared
+
+cat("Test MSE =", heroin_hs.mse, "\n")
+cat("Test RMSE =", heroin_hs.rmse, "\n")
+cat("Test MAE =", heroin_hs.mae, "\n")
+cat("Adjusted R-squared =", heroin_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(heroin_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(heroin_rate ~ med_income + poverty + bachelors, 
+#                         data = data_bach, 
+#                         method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(heroin_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$heroin_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(heroin_rate ~ med_income + poverty + bachelors, 
+                      data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+heroin_model_bach = lm(heroin_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach)
+
+
+summary(heroin_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(heroin_rate ~ med_income + poverty + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$heroin_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+heroin_bach.mse = min(mean.cv.errors)
+heroin_bach.rmse = sqrt(heroin_bach.mse)
+heroin_bach.mae = mean(cv.mae)
+heroin_bach.adjr2 = summary(heroin_model_bach)$adj.r.squared
+
+cat("Test MSE =", heroin_bach.mse, "\n")
+cat("Test RMSE =", heroin_bach.rmse, "\n")
+cat("Test MAE =", heroin_bach.mae, "\n")
+cat("Adjusted R-squared =", heroin_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(heroin_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$heroin_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.heroin = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.heroin = y
+
+# MSE, RMSE, MAE
+heroin_hs.ridge.mse = mean((actual.heroin - ridge.pred.heroin)^2)
+heroin_hs.ridge.rmse = sqrt(heroin_hs.ridge.mse)
+heroin_hs.ridge.mae = mean(abs(actual.heroin - ridge.pred.heroin))
+
+# R-squared
+heroin_hs.ridge.r2 = 1 - sum((actual.heroin - ridge.pred.heroin)^2) /
+  sum((actual.heroin - mean(actual.heroin))^2)
+
+# Adjusted R-squared
+n = length(actual.heroin)
+p = ncol(x)
+
+heroin_hs.ridge.adjr2 = 1 - ((1 - heroin_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", heroin_hs.ridge.mse, "\n")
+cat("RMSE =", heroin_hs.ridge.rmse, "\n")
+cat("MAE =", heroin_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", heroin_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(heroin_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$heroin_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+heroin_bach.ridge.mse = mean((actual - ridge.pred)^2)
+heroin_bach.ridge.rmse = sqrt(heroin_bach.ridge.mse)
+heroin_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+heroin_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+heroin_bach.ridge.adjr2 = 1 - ((1 - heroin_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", heroin_bach.ridge.mse, "\n")
+cat("RMSE =", heroin_bach.ridge.rmse, "\n")
+cat("MAE =", heroin_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", heroin_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+heroin_baseline.pred = mean(od_data$heroin_rate, na.rm = TRUE)
+
+heroin_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+
+heroin_baseline.rmse = sqrt(mean((od_data$heroin_rate - heroin_baseline.pred)^2,
+                                  na.rm = TRUE))
+
+heroin_baseline.mae = mean(abs(od_data$heroin_rate - heroin_baseline.pred.med),
+                            na.rm = TRUE)
+
+heroin_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(heroin_baseline.rmse,
+           heroin_hs.rmse,
+           heroin_bach.rmse,
+           heroin_hs.ridge.rmse,
+           heroin_bach.ridge.rmse),
+  
+  MAE = c(heroin_baseline.mae,
+          heroin_hs.mae,
+          heroin_bach.mae,
+          heroin_hs.ridge.mae,
+          heroin_bach.ridge.mae),
+  
+  Adjusted_R2 = c(heroin_baseline.adjr2,
+                  heroin_hs.adjr2,
+                  heroin_bach.adjr2,
+                  heroin_hs.ridge.adjr2,
+                  heroin_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Heroin Model Comparison')
+
+```
+
+### Prescription Opioids
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(rxopioids_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(rxopioids_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(rxopioids_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$rxopioids_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(rxopioids_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+rxopioids_model_hs = lm(rxopioids_rate ~ med_income + poverty, 
+                     data = data_hs)
+
+summary(rxopioids_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(rxopioids_rate ~ med_income + poverty,
+           data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$rxopioids_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+rxopioids_hs.mse = min(mean.cv.errors)
+rxopioids_hs.rmse = sqrt(rxopioids_hs.mse)
+rxopioids_hs.mae = mean(cv.mae)
+rxopioids_hs.adjr2 = summary(rxopioids_model_hs)$adj.r.squared
+
+cat("Test MSE =", rxopioids_hs.mse, "\n")
+cat("Test RMSE =", rxopioids_hs.rmse, "\n")
+cat("Test MAE =", rxopioids_hs.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(rxopioids_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(rxopioids_rate ~ med_income + poverty + bachelors, 
+#                         data = data_bach, 
+#                         method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(rxopioids_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$rxopioids_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(rxopioids_rate ~ med_income + poverty + bachelors, 
+                      data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+rxopioids_model_bach = lm(rxopioids_rate ~ poverty + bachelors, 
+                       data = data_bach)
+
+
+summary(rxopioids_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(rxopioids_rate ~ poverty + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$rxopioids_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+rxopioids_bach.mse = min(mean.cv.errors)
+rxopioids_bach.rmse = sqrt(rxopioids_bach.mse)
+rxopioids_bach.mae = mean(cv.mae)
+rxopioids_bach.adjr2 = summary(rxopioids_model_bach)$adj.r.squared
+
+cat("Test MSE =", rxopioids_bach.mse, "\n")
+cat("Test RMSE =", rxopioids_bach.rmse, "\n")
+cat("Test MAE =", rxopioids_bach.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(rxopioids_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$rxopioids_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+rxopioids_hs.ridge.mse = mean((actual - ridge.pred)^2)
+rxopioids_hs.ridge.rmse = sqrt(rxopioids_hs.ridge.mse)
+rxopioids_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+rxopioids_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+rxopioids_hs.ridge.adjr2 = 1 - ((1 - rxopioids_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", rxopioids_hs.ridge.mse, "\n")
+cat("RMSE =", rxopioids_hs.ridge.rmse, "\n")
+cat("MAE =", rxopioids_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(rxopioids_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$rxopioids_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+rxopioids_bach.ridge.mse = mean((actual - ridge.pred)^2)
+rxopioids_bach.ridge.rmse = sqrt(rxopioids_bach.ridge.mse)
+rxopioids_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+rxopioids_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+rxopioids_bach.ridge.adjr2 = 1 - ((1 - rxopioids_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", rxopioids_bach.ridge.mse, "\n")
+cat("RMSE =", rxopioids_bach.ridge.rmse, "\n")
+cat("MAE =", rxopioids_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+rxopioids_baseline.pred = mean(od_data$rxopioids_rate, na.rm = TRUE)
+
+rxopioids_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+
+rxopioids_baseline.rmse = sqrt(mean((od_data$rxopioids_rate - rxopioids_baseline.pred)^2,
+                                 na.rm = TRUE))
+
+rxopioids_baseline.mae = mean(abs(od_data$rxopioids_rate - rxopioids_baseline.pred.med),
+                           na.rm = TRUE)
+
+rxopioids_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(rxopioids_baseline.rmse,
+           rxopioids_hs.rmse,
+           rxopioids_bach.rmse,
+           rxopioids_hs.ridge.rmse,
+           rxopioids_bach.ridge.rmse),
+  
+  MAE = c(rxopioids_baseline.mae,
+          rxopioids_hs.mae,
+          rxopioids_bach.mae,
+          rxopioids_hs.ridge.mae,
+          rxopioids_bach.ridge.mae),
+  
+  Adjusted_R2 = c(rxopioids_baseline.adjr2,
+                  rxopioids_hs.adjr2,
+                  rxopioids_bach.adjr2,
+                  rxopioids_hs.ridge.adjr2,
+                  rxopioids_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Prescription Opioids Model Comparison')
+
+```
+
+### Cocaine
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(cocaine_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(cocaine_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(cocaine_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$cocaine_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(cocaine_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+cocaine_model_hs = lm(cocaine_rate ~ med_income + poverty + hs_grad, 
+                     data = data_hs)
+
+summary(cocaine_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(cocaine_rate ~ med_income + poverty + hs_grad,
+           data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$cocaine_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+cocaine_hs.mse = min(mean.cv.errors)
+cocaine_hs.rmse = sqrt(cocaine_hs.mse)
+cocaine_hs.mae = mean(cv.mae)
+cocaine_hs.adjr2 = summary(cocaine_model_hs)$adj.r.squared
+
+cat("Test MSE =", cocaine_hs.mse, "\n")
+cat("Test RMSE =", cocaine_hs.rmse, "\n")
+cat("Test MAE =", cocaine_hs.mae, "\n")
+cat("Adjusted R-squared =", cocaine_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(cocaine_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(cocaine_rate ~ med_income + poverty + bachelors, 
+#                         data = data_bach, 
+#                         method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(cocaine_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$cocaine_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(cocaine_rate ~ med_income + poverty + bachelors, 
+                      data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+cocaine_model_bach = lm(cocaine_rate ~ med_income + bachelors, 
+                       data = data_bach)
+
+
+summary(cocaine_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(cocaine_rate ~ med_income + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$cocaine_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+cocaine_bach.mse = min(mean.cv.errors)
+cocaine_bach.rmse = sqrt(cocaine_bach.mse)
+cocaine_bach.mae = mean(cv.mae)
+cocaine_bach.adjr2 = summary(cocaine_model_bach)$adj.r.squared
+
+cat("Test MSE =", cocaine_bach.mse, "\n")
+cat("Test RMSE =", cocaine_bach.rmse, "\n")
+cat("Test MAE =", cocaine_bach.mae, "\n")
+cat("Adjusted R-squared =", cocaine_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(cocaine_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$cocaine_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+cocaine_hs.ridge.mse = mean((actual - ridge.pred)^2)
+cocaine_hs.ridge.rmse = sqrt(cocaine_hs.ridge.mse)
+cocaine_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+cocaine_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+cocaine_hs.ridge.adjr2 = 1 - ((1 - cocaine_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", cocaine_hs.ridge.mse, "\n")
+cat("RMSE =", cocaine_hs.ridge.rmse, "\n")
+cat("MAE =", cocaine_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", cocaine_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(cocaine_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$cocaine_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+cocaine_bach.ridge.mse = mean((actual - ridge.pred)^2)
+cocaine_bach.ridge.rmse = sqrt(cocaine_bach.ridge.mse)
+cocaine_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+cocaine_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+cocaine_bach.ridge.adjr2 = 1 - ((1 - cocaine_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", cocaine_bach.ridge.mse, "\n")
+cat("RMSE =", cocaine_bach.ridge.rmse, "\n")
+cat("MAE =", cocaine_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", cocaine_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+cocaine_baseline.pred = mean(od_data$cocaine_rate, na.rm = TRUE)
+
+cocaine_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+cocaine_baseline.rmse = sqrt(mean((od_data$cocaine_rate - cocaine_baseline.pred)^2,
+                                 na.rm = TRUE))
+
+cocaine_baseline.mae = mean(abs(od_data$cocaine_rate - cocaine_baseline.pred.med),
+                           na.rm = TRUE)
+
+cocaine_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(cocaine_baseline.rmse,
+           cocaine_hs.rmse,
+           cocaine_bach.rmse,
+           cocaine_hs.ridge.rmse,
+           cocaine_bach.ridge.rmse),
+  
+  MAE = c(cocaine_baseline.mae,
+          cocaine_hs.mae,
+          cocaine_bach.mae,
+          cocaine_hs.ridge.mae,
+          cocaine_bach.ridge.mae),
+  
+  Adjusted_R2 = c(cocaine_baseline.adjr2,
+                  cocaine_hs.adjr2,
+                  cocaine_bach.adjr2,
+                  cocaine_hs.ridge.adjr2,
+                  cocaine_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Cocaine Model Comparison')
+
+```
+
+### Methamphetamine
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(meth_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(meth_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(meth_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$meth_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(meth_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+meth_model_hs = lm(meth_rate ~ poverty, 
+                     data = data_hs)
+
+summary(meth_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(meth_rate ~ poverty,
+           data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$meth_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+meth_hs.mse = min(mean.cv.errors)
+meth_hs.rmse = sqrt(meth_hs.mse)
+meth_hs.mae = mean(cv.mae)
+meth_hs.adjr2 = summary(meth_model_hs)$adj.r.squared
+
+cat("Test MSE =", meth_hs.mse, "\n")
+cat("Test RMSE =", meth_hs.rmse, "\n")
+cat("Test MAE =", meth_hs.mae, "\n")
+cat("Adjusted R-squared =", meth_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(meth_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(meth_rate ~ med_income + poverty + bachelors, 
+#                         data = data_bach, 
+#                         method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(meth_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$meth_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(meth_rate ~ med_income + poverty + bachelors, 
+                      data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+meth_model_bach = lm(meth_rate ~ med_income + poverty + bachelors, 
+                       data = data_bach)
+
+
+summary(meth_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(meth_rate ~ med_income + poverty + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$meth_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+meth_bach.mse = min(mean.cv.errors)
+meth_bach.rmse = sqrt(meth_bach.mse)
+meth_bach.mae = mean(cv.mae)
+meth_bach.adjr2 = summary(meth_model_bach)$adj.r.squared
+
+cat("Test MSE =", meth_bach.mse, "\n")
+cat("Test RMSE =", meth_bach.rmse, "\n")
+cat("Test MAE =", meth_bach.mae, "\n")
+cat("Adjusted R-squared =", meth_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(meth_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$meth_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+meth_hs.ridge.mse = mean((actual - ridge.pred)^2)
+meth_hs.ridge.rmse = sqrt(meth_hs.ridge.mse)
+meth_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+meth_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+meth_hs.ridge.adjr2 = 1 - ((1 - meth_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", meth_hs.ridge.mse, "\n")
+cat("RMSE =", meth_hs.ridge.rmse, "\n")
+cat("MAE =", meth_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", meth_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(meth_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$meth_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.meth = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.meth = y
+
+# MSE, RMSE, MAE
+meth_bach.ridge.mse = mean((actual.meth - ridge.pred.meth)^2)
+meth_bach.ridge.rmse = sqrt(meth_bach.ridge.mse)
+meth_bach.ridge.mae = mean(abs(actual.meth - ridge.pred.meth))
+
+# R-squared
+meth_bach.ridge.r2 = 1 - sum((actual.meth - ridge.pred.meth)^2) /
+  sum((actual.meth - mean(actual.meth))^2)
+
+# Adjusted R-squared
+n = length(actual.meth)
+p = ncol(x)
+
+meth_bach.ridge.adjr2 = 1 - ((1 - meth_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", meth_bach.ridge.mse, "\n")
+cat("RMSE =", meth_bach.ridge.rmse, "\n")
+cat("MAE =", meth_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", meth_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+meth_baseline.pred = mean(od_data$meth_rate, na.rm = TRUE)
+
+meth_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+
+meth_baseline.rmse = sqrt(mean((od_data$meth_rate - meth_baseline.pred)^2,
+                                 na.rm = TRUE))
+
+meth_baseline.mae = mean(abs(od_data$meth_rate - meth_baseline.pred.med),
+                           na.rm = TRUE)
+
+meth_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(meth_baseline.rmse,
+           meth_hs.rmse,
+           meth_bach.rmse,
+           meth_hs.ridge.rmse,
+           meth_bach.ridge.rmse),
+  
+  MAE = c(meth_baseline.mae,
+          meth_hs.mae,
+          meth_bach.mae,
+          meth_hs.ridge.mae,
+          meth_bach.ridge.mae),
+  
+  Adjusted_R2 = c(meth_baseline.adjr2,
+                  meth_hs.adjr2,
+                  meth_bach.adjr2,
+                  meth_hs.ridge.adjr2,
+                  meth_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Methamphetamine Model Comparison')
+
+```
+
+### Benzodiazepines
+
+```{r, eval=FALSE}
+
+# data cleaning 
+data_hs = od_data %>%
+  select(benzodiazepines_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+#backward elimination
+#regfit_hs = regsubsets(benzodiazepines_rate ~ med_income + poverty + hs_grad, 
+#                       data = data_hs, method = "backward")
+
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_hs), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(benzodiazepines_rate ~ med_income + poverty + hs_grad, 
+                        data = data_hs[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_hs[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_hs$benzodiazepines_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best_hs = regsubsets(benzodiazepines_rate ~ med_income + poverty + hs_grad, 
+                         data = data_hs, nvmax = 3, method = "backward")
+coef(reg.best_hs, which.min(mean.cv.errors))
+
+
+# obtained model
+benzo_model_hs = lm(benzodiazepines_rate ~ poverty, 
+                     data = data_hs)
+
+summary(benzo_model_hs)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(benzodiazepines_rate ~ poverty,
+           data = data_hs[folds != j, ])
+  
+  pred = predict(fit, newdata = data_hs[folds == j, ])
+  
+  actual = data_hs$benzodiazepines_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+benzo_hs.mse = min(mean.cv.errors)
+benzo_hs.rmse = sqrt(benzo_hs.mse)
+benzo_hs.mae = mean(cv.mae)
+benzo_hs.adjr2 = summary(benzo_model_hs)$adj.r.squared
+
+cat("Test MSE =", benzo_hs.mse, "\n")
+cat("Test RMSE =", benzo_hs.rmse, "\n")
+cat("Test MAE =", benzo_hs.mae, "\n")
+cat("Adjusted R-squared =", benzo_hs.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_bach = od_data %>%
+  select(benzodiazepines_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+#backward elimination
+#regfit_bach = regsubsets(benzodiazepines_rate ~ med_income + poverty + bachelors, 
+#                         data = data_bach, 
+#                         method = "backward")
+
+# backward elimination using 10-fold cross validation
+k = 10
+set.seed(1)
+
+folds = sample(1:k, nrow(data_bach), replace = TRUE)
+
+cv.errors = matrix(NA, k, 3, dimnames = list(NULL, paste(1:3)))
+
+# function for prediction with regsubsets
+predict.regsubsets = function(object, newdata, id, ...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  xvars = names(coefi)
+  mat[, xvars] %*% coefi
+}
+
+for(j in 1:k){
+  best.fit = regsubsets(benzodiazepines_rate ~ med_income + poverty + bachelors, 
+                        data = data_bach[folds != j, ],
+                        nvmax = 3,
+                        method = "backward")
+  
+  for(i in 1:3){
+    pred = predict(best.fit, data_bach[folds == j, ], id = i)
+    cv.errors[j, i] = mean((data_bach$benzodiazepines_rate[folds == j] - pred)^2)
+  }
+}
+
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+plot(mean.cv.errors, type = "b")
+
+# perform best subset selection and obtain the model
+reg.best = regsubsets(benzodiazepines_rate ~ med_income + poverty + bachelors, 
+                      data = data_bach, nvmax = 3, method = "backward")
+coef(reg.best, which.min(mean.cv.errors))
+
+
+# obtained model
+benzo_model_bach = lm(benzodiazepines_rate ~ med_income + poverty + bachelors, 
+                       data = data_bach)
+
+
+summary(benzo_model_bach)
+
+
+# Test MSE, RMSE, MAE
+cv.mae = rep(NA, k)
+
+for(j in 1:k){
+  fit = lm(benzodiazepines_rate ~ med_income + poverty + bachelors,
+           data = data_bach[folds != j, ])
+  
+  pred = predict(fit, newdata = data_bach[folds == j, ])
+  
+  actual = data_bach$benzodiazepines_rate[folds == j]
+  
+  cv.mae[j] = mean(abs(actual - pred))
+}
+
+benzo_bach.mse = min(mean.cv.errors)
+benzo_bach.rmse = sqrt(benzo_bach.mse)
+benzo_bach.mae = mean(cv.mae)
+benzo_bach.adjr2 = summary(benzo_model_bach)$adj.r.squared
+
+cat("Test MSE =", benzo_bach.mse, "\n")
+cat("Test RMSE =", benzo_bach.rmse, "\n")
+cat("Test MAE =", benzo_bach.mae, "\n")
+cat("Adjusted R-squared =", benzo_bach.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge hs
+
+x = model.matrix(benzodiazepines_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$benzodiazepines_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+benzo_hs.ridge.mse = mean((actual - ridge.pred)^2)
+benzo_hs.ridge.rmse = sqrt(benzo_hs.ridge.mse)
+benzo_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+benzo_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+benzo_hs.ridge.adjr2 = 1 - ((1 - benzo_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", benzo_hs.ridge.mse, "\n")
+cat("RMSE =", benzo_hs.ridge.rmse, "\n")
+cat("MAE =", benzo_hs.ridge.mae, "\n")
+cat("Adjusted R-squared =", benzo_hs.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+# ridge bachelors
+
+x = model.matrix(benzodiazepines_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$benzodiazepines_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+benzo_bach.ridge.mse = mean((actual - ridge.pred)^2)
+benzo_bach.ridge.rmse = sqrt(benzo_bach.ridge.mse)
+benzo_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+benzo_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+benzo_bach.ridge.adjr2 = 1 - ((1 - benzo_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", benzo_bach.ridge.mse, "\n")
+cat("RMSE =", benzo_bach.ridge.rmse, "\n")
+cat("MAE =", benzo_bach.ridge.mae, "\n")
+cat("Adjusted R-squared =", benzo_bach.ridge.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### stats comparisons
+
+# baseline model
+benzo_baseline.pred = mean(od_data$benzodiazepines_rate, na.rm = TRUE)
+benzo_baseline.pred.med = median(od_data$benzodiazepines_rate, na.rm = TRUE)
+
+
+benzo_baseline.rmse = sqrt(mean((od_data$benzodiazepines_rate - benzo_baseline.pred)^2,
+                                 na.rm = TRUE))
+
+benzo_baseline.mae = mean(abs(od_data$benzodiazepines_rate - benzo_baseline.pred.med),
+                           na.rm = TRUE)
+
+benzo_baseline.adjr2 = 0
+
+
+comparison_table = data.frame(
+  Model = c("Baseline",
+            "Linear regression with variable selection (hs_grad)",
+            "Linear regression with variable selection (bachelors)",
+            "Ridge regression (hs_grad)",
+            "Ridge regression (bachelors)"),
+  
+  RMSE = c(benzo_baseline.rmse,
+           benzo_hs.rmse,
+           benzo_bach.rmse,
+           benzo_hs.ridge.rmse,
+           benzo_bach.ridge.rmse),
+  
+  MAE = c(benzo_baseline.mae,
+          benzo_hs.mae,
+          benzo_bach.mae,
+          benzo_hs.ridge.mae,
+          benzo_bach.ridge.mae),
+  
+  Adjusted_R2 = c(benzo_baseline.adjr2,
+                  benzo_hs.adjr2,
+                  benzo_bach.adjr2,
+                  benzo_hs.ridge.adjr2,
+                  benzo_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Benzodiazepines Model Comparison')
+
+```
+
+# Research Question 2: Does the effect of poverty on overdose death rates depend on educational attainment of the population?
+
+## Results
+
+### All drugs
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_alldrug = od_data %>%
+  select(alldrug_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(alldrug_rate ~ med_income + poverty*bachelors,
+                 data = data_alldrug)[, -1]
+
+y = data_alldrug$alldrug_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+alldrug_int.mse = mean((actual - ridge.pred)^2)
+alldrug_int.rmse = sqrt(alldrug_int.mse)
+alldrug_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+alldrug_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+alldrug_int.adjr2 = 1 - ((1 - alldrug_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+cat("MSE =", alldrug_int.mse, "\n")
+cat("RMSE =", alldrug_int.rmse, "\n")
+cat("MAE =", alldrug_int.mae, "\n")
+cat("Adjusted R-squared =", alldrug_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(alldrug_int.rmse,
+           alldrug_bach.ridge.rmse),
+  
+  MAE = c(alldrug_int.mae,
+          alldrug_bach.ridge.mae),
+  
+  Adjusted_R2 = c(alldrug_int.adjr2,
+                  alldrug_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = '"All Drugs" Model Comparison (Poverty*Education)')
+
+```
+
+### Heroin
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_heroin = od_data %>%
+  select(heroin_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+x = model.matrix(heroin_rate ~ med_income + poverty*hs_grad,
+                 data = data_heroin)[, -1]
+
+y = data_heroin$heroin_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+heroin_int.mse = mean((actual - ridge.pred)^2)
+heroin_int.rmse = sqrt(heroin_int.mse)
+heroin_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+heroin_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+heroin_int.adjr2 = 1 - ((1 - heroin_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", heroin_int.mse, "\n")
+cat("RMSE =", heroin_int.rmse, "\n")
+cat("MAE =", heroin_int.mae, "\n")
+cat("Adjusted R-squared =", heroin_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(heroin_int.rmse,
+           heroin_hs.ridge.rmse),
+  
+  MAE = c(heroin_int.mae,
+          heroin_hs.ridge.mae),
+  
+  Adjusted_R2 = c(heroin_int.adjr2,
+                  heroin_hs.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Heroin Model Comparison (Poverty*Education)')
+
+```
+
+### Prescription Opioids
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_rxopioids = od_data %>%
+  select(rxopioids_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(rxopioids_rate ~ med_income + poverty*bachelors,
+                 data = data_rxopioids)[, -1]
+
+y = data_rxopioids$rxopioids_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+rxopioids_int.mse = mean((actual - ridge.pred)^2)
+rxopioids_int.rmse = sqrt(rxopioids_int.mse)
+rxopioids_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+rxopioids_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+rxopioids_int.adjr2 = 1 - ((1 - rxopioids_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", rxopioids_int.mse, "\n")
+cat("RMSE =", rxopioids_int.rmse, "\n")
+cat("MAE =", rxopioids_int.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(rxopioids_int.rmse,
+           rxopioids_bach.ridge.rmse),
+  
+  MAE = c(rxopioids_int.mae,
+          rxopioids_bach.ridge.mae),
+  
+  Adjusted_R2 = c(rxopioids_int.adjr2,
+                  rxopioids_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Prescription Opioids Model Comparison (Poverty*Education)')
+
+```
+
+### Cocaine
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_cocaine = od_data %>%
+  select(cocaine_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(cocaine_rate ~ med_income + poverty*bachelors,
+                 data = data_cocaine)[, -1]
+
+y = data_cocaine$cocaine_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+cocaine_int.mse = mean((actual - ridge.pred)^2)
+cocaine_int.rmse = sqrt(cocaine_int.mse)
+cocaine_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+cocaine_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+cocaine_int.adjr2 = 1 - ((1 - cocaine_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", cocaine_int.mse, "\n")
+cat("RMSE =", cocaine_int.rmse, "\n")
+cat("MAE =", cocaine_int.mae, "\n")
+cat("Adjusted R-squared =", cocaine_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(cocaine_int.rmse,
+           cocaine_bach.ridge.rmse),
+  
+  MAE = c(cocaine_int.mae,
+          cocaine_bach.ridge.mae),
+  
+  Adjusted_R2 = c(cocaine_int.adjr2,
+                  cocaine_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Cocaine Model Comparison (Poverty*Education)')
+
+```
+
+### Methamphetamine
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_meth = od_data %>%
+  select(meth_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(meth_rate ~ med_income + poverty*bachelors,
+                 data = data_meth)[, -1]
+
+y = data_meth$meth_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+meth_int.mse = mean((actual - ridge.pred)^2)
+meth_int.rmse = sqrt(meth_int.mse)
+meth_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+meth_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+meth_int.adjr2 = 1 - ((1 - meth_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", meth_int.mse, "\n")
+cat("RMSE =", meth_int.rmse, "\n")
+cat("MAE =", meth_int.mae, "\n")
+cat("Adjusted R-squared =", meth_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(meth_int.rmse,
+           meth_bach.ridge.rmse),
+  
+  MAE = c(meth_int.mae,
+          meth_bach.ridge.mae),
+  
+  Adjusted_R2 = c(meth_int.adjr2,
+                  meth_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Meth Model Comparison (Poverty*Education)')
+
+```
+
+### Benzodiazepines
+
+```{r, eval=FALSE}
+
+# data cleaning
+data_benzo = od_data %>%
+  select(benzodiazepines_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+x = model.matrix(benzodiazepines_rate ~ med_income + poverty*hs_grad,
+                 data = data_benzo)[, -1]
+
+y = data_benzo$benzodiazepines_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+benzo_int.mse = mean((actual - ridge.pred)^2)
+benzo_int.rmse = sqrt(benzo_int.mse)
+benzo_int.mae = mean(abs(actual - ridge.pred))
+
+# R2
+benzo_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R2
+n = length(actual)
+p = ncol(x)
+
+benzo_int.adjr2 = 1 - ((1 - benzo_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", benzo_int.mse, "\n")
+cat("RMSE =", benzo_int.rmse, "\n")
+cat("MAE =", benzo_int.mae, "\n")
+cat("Adjusted R-squared =", benzo_int.adjr2, "\n")
+
+```
+
+```{r, eval=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(benzo_int.rmse,
+           benzo_hs.ridge.rmse),
+  
+  MAE = c(benzo_int.mae,
+          benzo_hs.ridge.mae),
+  
+  Adjusted_R2 = c(benzo_int.adjr2,
+                  benzo_hs.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Benzodiazepines Model Comparison (Poverty*Education)')
+
+```
+
+# Research Question 3: Are there significant differences in overdose death rate between males and females?
+
+## Results
+
+```{r, eval=FALSE}
+
+# data cleaning
+gender_data = od_data %>%
+  select(male_rate, female_rate) %>%
+  drop_na()
+
+
+# do males differ from females t-test
+t_test_gender = t.test(gender_data$male_rate,
+                       gender_data$female_rate,
+                       paired = FALSE)
+
+t_test_gender
+colMeans(gender_data)
+
+```
+
+```{r, eval=FALSE}
+
+gender_long = od_data %>%
+  select(male_rate, female_rate) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Sex",
+               values_to = "Rate") %>%
+  drop_na()
+
+ggplot(gender_long, aes(x = Sex, y = Rate, fill = Sex)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c(
+    "female_rate" = "Female",
+    "male_rate" = "Male"
+  )) +
+  labs(
+    title = "Overdose Death Rates by Sex",
+    x = "Sex",
+    y = "Overdose Death Rate (per 100,000)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+# Research Question 4: Are there significant differences in overdose death rate between different age groups?
+
+## Results
+
+```{r, eval=FALSE}
+
+age_long = od_data %>%
+  select(age_15_24_rate,
+         age_25_34_rate,
+         age_35_44_rate,
+         age_45_54_rate,
+         age_55_64_rate,
+         age_65plus_rate) %>%
+  pivot_longer(cols = everything(),
+               names_to = "age_group",
+               values_to = "rate") %>%
+  drop_na()
+
+# Levene's test to see if variance is equal across groups
+leveneTest(rate ~ age_group, data = age_long)
+
+# assumption is violated, so do Welch's ANOVA
+welch_age = oneway.test(rate ~ age_group,
+                         data = age_long,
+                         var.equal = FALSE)
+
+welch_age
+
+pairwise_age = pairwise.t.test(age_long$rate,
+                                age_long$age_group,
+                                p.adjust.method = "BH",
+                                pool.sd = FALSE)
+
+pairwise_age
+
+```
+
+```{r, eval=FALSE}
+
+pairwise_table = as.data.frame(as.table(pairwise_age$p.value))
+
+pairwise_table = na.omit(pairwise_table)
+
+colnames(pairwise_table) = c("Group_1", "Group_2", "Adjusted_p_value")
+
+pairwise_table$Group_1 = dplyr::recode(pairwise_table$Group_1,
+  age_15_24_rate = "Ages 15-24",
+  age_25_34_rate = "Ages 25-34",
+  age_35_44_rate = "Ages 35-44",
+  age_45_54_rate = "Ages 45-54",
+  age_55_64_rate = "Ages 55-64",
+  age_65plus_rate = "Ages 65+"
+)
+
+pairwise_table$Group_2 = dplyr::recode(pairwise_table$Group_2,
+  age_15_24_rate = "Ages 15-24",
+  age_25_34_rate = "Ages 25-34",
+  age_35_44_rate = "Ages 35-44",
+  age_45_54_rate = "Ages 45-54",
+  age_55_64_rate = "Ages 55-64",
+  age_65plus_rate = "Ages 65+"
+)
+
+# significance column
+pairwise_table$Significant <- ifelse(
+  pairwise_table$Adjusted_p_value < 0.05,
+  "Yes",
+  "No"
+)
+
+knitr::kable(
+  pairwise_table,
+  digits = 4,
+  col.names = c("Age Group 1", "Age Group 2", "Adjusted p-value", "Significant?")
+)
+```
+
+```{r, eval=FALSE}
+
+ggplot(age_long, aes(x = age_group, y = rate, fill = age_group)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c(
+    "age_15_24_rate" = "Ages 15-24",
+    "age_25_34_rate" = "Ages 25-34",
+    "age_35_44_rate" = "Ages 35-44",
+    "age_45_54_rate" = "Ages 45-54",
+    "age_55_64_rate" = "Ages 55-64",
+    "age_65plus_rate" = "Ages 65+"
+  )) +
+  labs(
+    title = "Overdose Death Rates by Age Group",
+    x = "Age Group",
+    y = "Death Rate (per 100,000)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+# Residual Plots
+
+## All Drugs
+
+```{r, eval=FALSE}
+
+# Residuals
+res_alldrug = actual.alldrug - as.vector(ridge.pred.alldrug)
+
+plot(ridge.pred.alldrug, res_alldrug,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residual Plot: All Drugs Model")
+abline(h = 0,
+       col = "red",
+       lwd = 2)
+
+
+qqnorm(res_alldrug,
+       main = "QQ Plot: All Drugs Model")
+qqline(res_alldrug,
+       col = "red",
+       lwd = 2)
+
+```
+
+## Heroin
+
+```{r, eval=FALSE}
+
+# Residuals
+res_heroin = actual.heroin - as.vector(ridge.pred.heroin)
+
+plot(ridge.pred.heroin, res_heroin,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residual Plot: Heroin Model")
+abline(h = 0,
+       col = "red",
+       lwd = 2)
+
+
+qqnorm(res_heroin,
+       main = "QQ Plot: Heroin Model")
+qqline(res_heroin,
+       col = "red",
+       lwd = 2)
+
+```
+
+## Prescription Opioids
+
+```{r, eval=FALSE}
+
+# Residuals
+res_rxopioids = resid(rxopioids_model_bach) 
+
+plot(predict(rxopioids_model_bach), res_rxopioids, 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residual Plot: Prescription Opioids Model") 
+abline(h=0)
+
+
+qqnorm(res_rxopioids,
+       main = "QQ Plot: Prescription Opioids Model")
+qqline(res_rxopioids, col = "red")
+
+```
+
+## Cocaine
+
+```{r, eval=FALSE}
+
+# Residuals
+res_cocaine = resid(cocaine_model_bach) 
+
+plot(predict(cocaine_model_bach), res_cocaine, 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residual Plot: Cocaine Model") 
+abline(h=0)
+
+
+qqnorm(res_cocaine,
+       main = "QQ Plot: Cocaine Model")
+qqline(res_cocaine, col = "red")
+
+```
+
+## Methamphetamine
+
+```{r, eval=FALSE}
+
+# Residuals
+res_meth = actual.meth - as.vector(ridge.pred.meth)
+
+plot(ridge.pred.meth, res_meth,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residual Plot: Methamphetamine Model")
+abline(h = 0,
+       col = "red",
+       lwd = 2)
+
+
+qqnorm(res_meth,
+       main = "QQ Plot: Methamphetamine Model")
+qqline(res_meth,
+       col = "red",
+       lwd = 2)
+
+```
+
+## Benzodiazepines
+
+```{r, eval=FALSE}
+
+# Residuals
+res_benzo = resid(benzo_model_hs) 
+
+plot(predict(benzo_model_hs), res_benzo, 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residual Plot: Benzodiazepines Model") 
+abline(h=0)
+
+qqnorm(res_benzo,
+       main = "QQ Plot: Benzodiazepines Model")
+qqline(res_benzo, col = "red")
+
+```

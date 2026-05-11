@@ -1,0 +1,835 @@
+---
+title: "Research Question 2"
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+# load packages used
+
+library(readxl)
+library(tidyverse)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(car)
+library(knitr)
+library(patchwork)
+library(leaps)
+
+# load data
+od_data = read_excel("overdose_data.xlsx")
+
+# change state and year to factor variables
+od_data = od_data %>%
+  mutate(
+    state = factor(state),
+    year = factor(year),
+    med_income = med_income/1000
+  )
+
+# change all 9999 values to NA
+od_data = od_data %>%
+  mutate(across(where(is.numeric), ~ na_if(., 9999)))
+
+
+```
+
+# Does the effect of poverty on overdose death rates depend on educational attainment of the population?
+
+## Statistical Methods
+
+For each drug category, we choose the ridge regression model containing either `hs_grad` or `bachelors` based on the results above and add an interaction term between `poverty` and the education predictor, then compare the RMSE, MAE, and adjusted $R^2$ of this model to those of the original model without the interaction term.
+
+Ridge regression is used for this analysis because it is more robust to the collinearities among socioeconomic predictors. Using ridge regression allows the predictor variables to remain as consistent as possible across the different drug models since we can keep all socioeconomic variables in every model regardless of multicollinearities. Although linear regression models with variable selection achieved slightly better predictive performances for some drug categories, the ridge regression models performed similarly enough that the modest reduction in predictive accuracy was considered an acceptable tradeoff for improved consistency and comparability across models.
+
+## Results
+
+### All drugs
+
+```{r, include=FALSE}
+
+data_bach = od_data %>%
+  select(alldrug_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+# ridge bachelors
+
+x = model.matrix(alldrug_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$alldrug_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.alldrug = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.alldrug = y
+
+# MSE, RMSE, MAE
+alldrug_bach.ridge.mse = mean((actual.alldrug - ridge.pred.alldrug)^2)
+alldrug_bach.ridge.rmse = sqrt(alldrug_bach.ridge.mse)
+alldrug_bach.ridge.mae = mean(abs(actual.alldrug - ridge.pred.alldrug))
+
+# R-squared
+alldrug_bach.ridge.r2 = 1 - sum((actual.alldrug - ridge.pred.alldrug)^2) /
+  sum((actual.alldrug - mean(actual.alldrug))^2)
+
+# Adjusted R-squared
+n = length(actual.alldrug)
+p = ncol(x)
+
+alldrug_bach.ridge.adjr2 = 1 - ((1 - alldrug_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_alldrug = od_data %>%
+  select(alldrug_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(alldrug_rate ~ med_income + poverty*bachelors,
+                 data = data_alldrug)[, -1]
+
+y = data_alldrug$alldrug_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+alldrug_int.mse = mean((actual - ridge.pred)^2)
+alldrug_int.rmse = sqrt(alldrug_int.mse)
+alldrug_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+alldrug_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+alldrug_int.adjr2 = 1 - ((1 - alldrug_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+cat("MSE =", alldrug_int.mse, "\n")
+cat("RMSE =", alldrug_int.rmse, "\n")
+cat("MAE =", alldrug_int.mae, "\n")
+cat("Adjusted R-squared =", alldrug_int.adjr2, "\n")
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(alldrug_int.rmse,
+           alldrug_bach.ridge.rmse),
+  
+  MAE = c(alldrug_int.mae,
+          alldrug_bach.ridge.mae),
+  
+  Adjusted_R2 = c(alldrug_int.adjr2,
+                  alldrug_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = '"All Drugs" Model Comparison (Poverty*Education)')
+
+```
+
+### Heroin
+
+```{r, include=FALSE}
+
+data_hs = od_data %>%
+  select(heroin_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+# ridge hs
+
+x = model.matrix(heroin_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$heroin_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.heroin = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.heroin = y
+
+# MSE, RMSE, MAE
+heroin_hs.ridge.mse = mean((actual.heroin - ridge.pred.heroin)^2)
+heroin_hs.ridge.rmse = sqrt(heroin_hs.ridge.mse)
+heroin_hs.ridge.mae = mean(abs(actual.heroin - ridge.pred.heroin))
+
+# R-squared
+heroin_hs.ridge.r2 = 1 - sum((actual.heroin - ridge.pred.heroin)^2) /
+  sum((actual.heroin - mean(actual.heroin))^2)
+
+# Adjusted R-squared
+n = length(actual.heroin)
+p = ncol(x)
+
+heroin_hs.ridge.adjr2 = 1 - ((1 - heroin_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_heroin = od_data %>%
+  select(heroin_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+x = model.matrix(heroin_rate ~ med_income + poverty*hs_grad,
+                 data = data_heroin)[, -1]
+
+y = data_heroin$heroin_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+heroin_int.mse = mean((actual - ridge.pred)^2)
+heroin_int.rmse = sqrt(heroin_int.mse)
+heroin_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+heroin_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+heroin_int.adjr2 = 1 - ((1 - heroin_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", heroin_int.mse, "\n")
+cat("RMSE =", heroin_int.rmse, "\n")
+cat("MAE =", heroin_int.mae, "\n")
+cat("Adjusted R-squared =", heroin_int.adjr2, "\n")
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(heroin_int.rmse,
+           heroin_hs.ridge.rmse),
+  
+  MAE = c(heroin_int.mae,
+          heroin_hs.ridge.mae),
+  
+  Adjusted_R2 = c(heroin_int.adjr2,
+                  heroin_hs.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Heroin Model Comparison (Poverty*Education)')
+
+```
+
+### Prescription Opioids
+
+```{r, include=FALSE}
+
+data_bach = od_data %>%
+  select(rxopioids_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+# ridge bachelors
+
+x = model.matrix(rxopioids_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$rxopioids_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+rxopioids_bach.ridge.mse = mean((actual - ridge.pred)^2)
+rxopioids_bach.ridge.rmse = sqrt(rxopioids_bach.ridge.mse)
+rxopioids_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+rxopioids_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+rxopioids_bach.ridge.adjr2 = 1 - ((1 - rxopioids_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_rxopioids = od_data %>%
+  select(rxopioids_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(rxopioids_rate ~ med_income + poverty*bachelors,
+                 data = data_rxopioids)[, -1]
+
+y = data_rxopioids$rxopioids_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+rxopioids_int.mse = mean((actual - ridge.pred)^2)
+rxopioids_int.rmse = sqrt(rxopioids_int.mse)
+rxopioids_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+rxopioids_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+rxopioids_int.adjr2 = 1 - ((1 - rxopioids_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", rxopioids_int.mse, "\n")
+cat("RMSE =", rxopioids_int.rmse, "\n")
+cat("MAE =", rxopioids_int.mae, "\n")
+cat("Adjusted R-squared =", rxopioids_int.adjr2, "\n")
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(rxopioids_int.rmse,
+           rxopioids_bach.ridge.rmse),
+  
+  MAE = c(rxopioids_int.mae,
+          rxopioids_bach.ridge.mae),
+  
+  Adjusted_R2 = c(rxopioids_int.adjr2,
+                  rxopioids_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Prescription Opioids Model Comparison (Poverty*Education)')
+
+```
+
+### Cocaine
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_cocaine = od_data %>%
+  select(cocaine_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(cocaine_rate ~ med_income + poverty*bachelors,
+                 data = data_cocaine)[, -1]
+
+y = data_cocaine$cocaine_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+cocaine_int.mse = mean((actual - ridge.pred)^2)
+cocaine_int.rmse = sqrt(cocaine_int.mse)
+cocaine_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+cocaine_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+cocaine_int.adjr2 = 1 - ((1 - cocaine_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, include=FALSE}
+
+data_bach = od_data %>%
+  select(cocaine_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+# ridge bachelors
+
+x = model.matrix(cocaine_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$cocaine_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+cocaine_bach.ridge.mse = mean((actual - ridge.pred)^2)
+cocaine_bach.ridge.rmse = sqrt(cocaine_bach.ridge.mse)
+cocaine_bach.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+cocaine_bach.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+cocaine_bach.ridge.adjr2 = 1 - ((1 - cocaine_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(cocaine_int.rmse,
+           cocaine_bach.ridge.rmse),
+  
+  MAE = c(cocaine_int.mae,
+          cocaine_bach.ridge.mae),
+  
+  Adjusted_R2 = c(cocaine_int.adjr2,
+                  cocaine_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Cocaine Model Comparison (Poverty*Education)')
+
+```
+
+### Methamphetamine
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_meth = od_data %>%
+  select(meth_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+x = model.matrix(meth_rate ~ med_income + poverty*bachelors,
+                 data = data_meth)[, -1]
+
+y = data_meth$meth_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+meth_int.mse = mean((actual - ridge.pred)^2)
+meth_int.rmse = sqrt(meth_int.mse)
+meth_int.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+meth_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+meth_int.adjr2 = 1 - ((1 - meth_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", meth_int.mse, "\n")
+cat("RMSE =", meth_int.rmse, "\n")
+cat("MAE =", meth_int.mae, "\n")
+cat("Adjusted R-squared =", meth_int.adjr2, "\n")
+
+```
+
+```{r, include=FALSE}
+
+data_bach = od_data %>%
+  select(meth_rate, med_income, poverty, bachelors) %>%
+  drop_na()
+
+# ridge bachelors
+
+x = model.matrix(meth_rate ~ med_income + poverty + bachelors,
+                 data = data_bach)[, -1]
+
+y = data_bach$meth_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred.meth = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual.meth = y
+
+# MSE, RMSE, MAE
+meth_bach.ridge.mse = mean((actual.meth - ridge.pred.meth)^2)
+meth_bach.ridge.rmse = sqrt(meth_bach.ridge.mse)
+meth_bach.ridge.mae = mean(abs(actual.meth - ridge.pred.meth))
+
+# R-squared
+meth_bach.ridge.r2 = 1 - sum((actual.meth - ridge.pred.meth)^2) /
+  sum((actual.meth - mean(actual.meth))^2)
+
+# Adjusted R-squared
+n = length(actual.meth)
+p = ncol(x)
+
+meth_bach.ridge.adjr2 = 1 - ((1 - meth_bach.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*bachelors interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(meth_int.rmse,
+           meth_bach.ridge.rmse),
+  
+  MAE = c(meth_int.mae,
+          meth_bach.ridge.mae),
+  
+  Adjusted_R2 = c(meth_int.adjr2,
+                  meth_bach.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Meth Model Comparison (Poverty*Education)')
+
+```
+
+### Benzodiazepines
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# data cleaning
+data_benzo = od_data %>%
+  select(benzodiazepines_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+x = model.matrix(benzodiazepines_rate ~ med_income + poverty*hs_grad,
+                 data = data_benzo)[, -1]
+
+y = data_benzo$benzodiazepines_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+benzo_int.mse = mean((actual - ridge.pred)^2)
+benzo_int.rmse = sqrt(benzo_int.mse)
+benzo_int.mae = mean(abs(actual - ridge.pred))
+
+# R2
+benzo_int.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R2
+n = length(actual)
+p = ncol(x)
+
+benzo_int.adjr2 = 1 - ((1 - benzo_int.r2) * (n - 1)) /
+  (n - p - 1)
+
+
+cat("MSE =", benzo_int.mse, "\n")
+cat("RMSE =", benzo_int.rmse, "\n")
+cat("MAE =", benzo_int.mae, "\n")
+cat("Adjusted R-squared =", benzo_int.adjr2, "\n")
+
+```
+
+```{r, include=FALSE}
+
+data_hs = od_data %>%
+  select(benzodiazepines_rate, med_income, poverty, hs_grad) %>%
+  drop_na()
+
+# ridge hs
+
+x = model.matrix(benzodiazepines_rate ~ med_income + poverty + hs_grad,
+                 data = data_hs)[, -1]
+
+y = data_hs$benzodiazepines_rate
+
+set.seed(1)
+
+# 10-fold cross-validation ridge regression
+cv.out.ridge = cv.glmnet(x, y, alpha = 0, nfolds = 10)
+
+# best lambda
+bestlam.ridge = cv.out.ridge$lambda.min
+
+# final ridge model
+ridge.mod = glmnet(x, y, alpha = 0, lambda = bestlam.ridge)
+
+# coefficients
+coef(ridge.mod)
+
+# predictions using 10-fold CV-selected lambda
+ridge.pred = predict(cv.out.ridge, s = "lambda.min", newx = x)
+
+actual = y
+
+# MSE, RMSE, MAE
+benzo_hs.ridge.mse = mean((actual - ridge.pred)^2)
+benzo_hs.ridge.rmse = sqrt(benzo_hs.ridge.mse)
+benzo_hs.ridge.mae = mean(abs(actual - ridge.pred))
+
+# R-squared
+benzo_hs.ridge.r2 = 1 - sum((actual - ridge.pred)^2) /
+  sum((actual - mean(actual))^2)
+
+# Adjusted R-squared
+n = length(actual)
+p = ncol(x)
+
+benzo_hs.ridge.adjr2 = 1 - ((1 - benzo_hs.ridge.r2) * (n - 1)) /
+  (n - p - 1)
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+### compare
+
+comparison_table = data.frame(
+  Model = c("poverty*hs_grad interaction",
+            "No interaction term"
+            ),
+  
+  RMSE = c(benzo_int.rmse,
+           benzo_hs.ridge.rmse),
+  
+  MAE = c(benzo_int.mae,
+          benzo_hs.ridge.mae),
+  
+  Adjusted_R2 = c(benzo_int.adjr2,
+                  benzo_hs.ridge.adjr2)
+)
+
+knitr::kable(comparison_table,
+             digits = 3,
+             caption = 'Benzodiazepines Model Comparison (Poverty*Education)')
+
+```
+
+## Analysis of Results
+
+For drugs overall, heroin, and methamphetamine, the models without an interaction term between poverty rate and educational attainment levels performed slightly better. Conversely, the models with interaction terms performed slightly better for cocaine, prescription opioids, and benzodiazepines. These improvements were modest, however, suggesting that the effect of poverty on overdose mortality rates is relatively consistent across different levels of educational attainment. In other words, while both poverty and education are independently related to overdose mortality, the relationship between poverty and overdose death rates does not appear to substantially strengthen or weaken depending on the education level of the population.
+
+At the same time, the similar patterns observed among the cocaine, prescription opioids, and benzodiazepines models mirror the similarities identified in the analysis for Research Question 1. These recurring patterns support the likelihood that additional contributing factors beyond the socioeconomic variables included in this study play an important role in overdose mortality for these substances.

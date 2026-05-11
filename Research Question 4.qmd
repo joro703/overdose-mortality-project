@@ -1,0 +1,148 @@
+---
+title: "Research Question 4"
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+# load packages used
+
+library(readxl)
+library(tidyverse)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(car)
+library(knitr)
+library(patchwork)
+library(leaps)
+
+# load data
+od_data = read_excel("overdose_data.xlsx")
+
+# change state and year to factor variables
+od_data = od_data %>%
+  mutate(
+    state = factor(state),
+    year = factor(year),
+    med_income = med_income/1000
+  )
+
+# change all 9999 values to NA
+od_data = od_data %>%
+  mutate(across(where(is.numeric), ~ na_if(., 9999)))
+
+```
+
+# Are there significant differences in overdose death rate between different age groups?
+
+## Statistical Methods
+
+We set the significance level at 0.05 for all tests.
+
+Levene's test shows unequal variances in overdose death rates across age groups ($p<2.2e-16$), so we perform a Welch ANOVA. Pairwise Welch t-tests are performed as well to compare overdose death rates between age-group pairs.
+
+## Results
+
+The Welch ANOVA found statistically significant differences in overdose death rates across age groups ($p < 2.2e-16$).
+
+The results of the pairwise t-test comparisons between age groups are summarized in the table below.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide', include=FALSE}
+
+age_long = od_data %>%
+  select(age_15_24_rate,
+         age_25_34_rate,
+         age_35_44_rate,
+         age_45_54_rate,
+         age_55_64_rate,
+         age_65plus_rate) %>%
+  pivot_longer(cols = everything(),
+               names_to = "age_group",
+               values_to = "rate") %>%
+  drop_na()
+
+# Levene's test to see if variance is equal across groups
+leveneTest(rate ~ age_group, data = age_long)
+
+# assumption is violated, so do Welch's ANOVA
+welch_age = oneway.test(rate ~ age_group,
+                         data = age_long,
+                         var.equal = FALSE)
+
+welch_age
+
+pairwise_age = pairwise.t.test(age_long$rate,
+                                age_long$age_group,
+                                p.adjust.method = "BH",
+                                pool.sd = FALSE)
+
+pairwise_age
+
+```
+
+```{r, echo=FALSE}
+
+pairwise_table = as.data.frame(as.table(pairwise_age$p.value))
+
+pairwise_table = na.omit(pairwise_table)
+
+colnames(pairwise_table) = c("Group_1", "Group_2", "Adjusted_p_value")
+
+pairwise_table$Group_1 = dplyr::recode(pairwise_table$Group_1,
+  age_15_24_rate = "Ages 15-24",
+  age_25_34_rate = "Ages 25-34",
+  age_35_44_rate = "Ages 35-44",
+  age_45_54_rate = "Ages 45-54",
+  age_55_64_rate = "Ages 55-64",
+  age_65plus_rate = "Ages 65+"
+)
+
+pairwise_table$Group_2 = dplyr::recode(pairwise_table$Group_2,
+  age_15_24_rate = "Ages 15-24",
+  age_25_34_rate = "Ages 25-34",
+  age_35_44_rate = "Ages 35-44",
+  age_45_54_rate = "Ages 45-54",
+  age_55_64_rate = "Ages 55-64",
+  age_65plus_rate = "Ages 65+"
+)
+
+# significance column
+pairwise_table$Significant <- ifelse(
+  pairwise_table$Adjusted_p_value < 0.05,
+  "Yes",
+  "No"
+)
+
+knitr::kable(
+  pairwise_table,
+  digits = 4,
+  col.names = c("Age Group 1", "Age Group 2", "Adjusted p-value", "Significant?")
+)
+```
+
+```{r, echo=FALSE}
+
+ggplot(age_long, aes(x = age_group, y = rate, fill = age_group)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c(
+    "age_15_24_rate" = "Ages 15-24",
+    "age_25_34_rate" = "Ages 25-34",
+    "age_35_44_rate" = "Ages 35-44",
+    "age_45_54_rate" = "Ages 45-54",
+    "age_55_64_rate" = "Ages 55-64",
+    "age_65plus_rate" = "Ages 65+"
+  )) +
+  labs(
+    title = "Overdose Death Rates by Age Group",
+    x = "Age Group",
+    y = "Death Rate (per 100,000)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+## Analysis of Results
+
+The 15-24 and 65+ age groups had the lowest overdose death rates and were not found to differ significantly from each other. In contrast, overdose death rates were significantly higher among adults age 25–64 compared to both groups. Mortality rates were relatively low in the 15-24 age group, then increased substantially, peaking among middle-aged groups, particularly individuals age 35-54, before dropping off sharply again in the 65+ age group. The 35-44 age group differed significantly from every age group except 45-54 and has the highest rates overall.
+
+Several factors may contribute to this pattern of overdose mortality being concentrated among prime working-age adults. Individuals in middle adulthood may experience greater exposure to chronic stress, mental health challenges, or long-term substance dependence. The lower overdose death rates observed among younger individuals (ages 15–24) may reflect lower cumulative exposure to addictive substances or shorter durations of substance use. Similarly, the decline in overdose death rates among older individuals (ages 65 and older) may be a result of lower rates of illicit drug use or survivor effects. Differences in healthcare utilization or practices between age groups may contribute to differences in overdose death rates as well.

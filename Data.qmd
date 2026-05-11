@@ -1,0 +1,436 @@
+---
+title: "Data"
+bibliography: references.bib
+csl: apa.csl
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+# load packages used
+
+library(readxl)
+library(tidyverse)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(car)
+library(knitr)
+library(patchwork)
+library(leaps)
+
+```
+
+Over the years 2020-2024, the CDC’s State Unintentional Drug Overdose Reporting System (SUDORS) compiled data on unintentional and undetermined-intent drug overdose deaths, stratified by drug type, age, and sex, in 33-43 states including DC. A portion of this Fatal Drug Overdose Data [@cdc_sudors] was combined with income and educational attainment data from the Federal Reserve Bank of St. Louis (FRED) [@fred_income; @fred_hs; @fred_bachelors] and poverty data from the US Census Bureau [@census_poverty2022; @census_poverty2023; @census_poverty2024]. There are 187 observations.
+
+```{r, message=FALSE, warning=FALSE, results='hide', echo=FALSE, include=FALSE}
+
+# load data
+od_data = read_excel("overdose_data.xlsx")
+
+glimpse(od_data)
+
+# change state and year to factor variables
+od_data = od_data %>%
+  mutate(
+    state = factor(state),
+    year = factor(year),
+    med_income = med_income/1000
+  )
+
+# change all 9999 values to NA
+od_data = od_data %>%
+  mutate(across(where(is.numeric), ~ na_if(., 9999)))
+
+```
+
+We explore how the following variables can be used to explain and predict overdose death rates, given as an age-adjusted rate per 100,000 persons, for any/all drugs, heroin, prescription opioids, cocaine, methamphetamine, and benzodiazepines.
+
+```{r,  message=FALSE, warning=FALSE, echo=FALSE}
+
+vars = data.frame(
+  Variable = c("`median_income` ", "`poverty`", "`hs_grad`", "`bachelors`"),
+  Description = c(
+    "median household income in thousands (USD)",
+    "percentage of the population below the national poverty threshold (i.e., poverty rate)",
+    "percentage of the population 18 years and over with a high school diploma or higher",
+    "percentage of the population 18 years and over with a bachelor's degree or higher"
+  )
+)
+
+kable(vars, col.names = NULL)
+```
+
+The following graphs show the distribution of overdose death rates for each drug. We note that all of the distributions are unimodal and right-skewed.
+
+```{r,  message=FALSE, warning=FALSE, echo=FALSE}
+
+od_long = od_data %>%
+  select(alldrug_rate, heroin_rate, rxopioids_rate, 
+         cocaine_rate, meth_rate, benzodiazepines_rate) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "drug",
+    values_to = "rate"
+  )
+
+od_long$drug = factor(od_long$drug,
+  levels = c("alldrug_rate", "heroin_rate", "rxopioids_rate",
+             "cocaine_rate", "meth_rate", "benzodiazepines_rate"),
+  labels = c("All Drugs", "Heroin", "Prescription Opioids",
+             "Cocaine", "Methamphetamine", "Benzodiazepines")
+)
+
+ggplot(od_long, aes(x = rate)) +
+  geom_histogram(bins = 20, color = "black", fill = "lightsteelblue2") +
+  facet_wrap(~ drug, scales = "free_x") +
+  labs(
+    x = "Overdose Death Rate (per 100,000 persons)",
+    y = "Count",
+    title = "Distribution of Overdose Death Rates by Drug Type"
+  )
+
+```
+
+We also present scatterplots illustrating relationships between each predictor variable and the overdose death rate for each drug type.
+
+## All drugs:
+
+No clear relationship can be discerned between states' drug overdose death rates and median household income, proportion of the population with a high school diploma or higher, or proportion of the population with a bachelor's degree or higher. There appears to be a weak positive correlation between drug overdose deaths and poverty rate ($r = 0.33$).
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = alldrug_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+       x = "Median Income (in thousands)",
+       y = "Overdose Death Rate",
+       title = "Overdose Deaths vs Median Income"
+     )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = alldrug_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+        x = "Poverty Rate",
+        y = "Overdose Death Rate",
+        title = "Overdose Deaths vs Poverty Rate"
+     )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(alldrug_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = alldrug_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# correlation between alldrug_rate and poverty
+d = od_data %>%
+  select(alldrug_rate, poverty) %>%
+  na.omit()
+cor(d$alldrug_rate, d$poverty)
+
+```
+
+## Heroin:
+
+No clear relationship can be discerned between states' heroin overdose death rates and median household income, poverty rate, proportion of the population with a high school diploma or higher, or proportion of the population with a bachelor's degree or higher.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = heroin_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+       x = "Median Income (in thousands)",
+       y = "Overdose Death Rate",
+       title = "Overdose Deaths vs Median Income"
+     )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = heroin_rate)) +
+      geom_point(color = "steelblue") +
+      labs(
+        x = "Poverty Rate",
+        y = "Overdose Death Rate",
+        title = "Overdose Deaths vs Poverty Rate"
+     )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(heroin_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = heroin_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+## Prescription Opioids:
+
+Omitting a few outliers, no clear relationship can be discerned between states' prescription opioid overdose death rates and median household income, poverty rate, proportion of the population with a high school diploma or higher, or proportion of the population with a bachelor's degree or higher.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(rxopioids_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = rxopioids_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+## Cocaine:
+
+No clear relationship can be discerned between states' cocaine overdose death rates and median household income, poverty rate, proportion of the population with a high school diploma or higher. There appears to be a moderate positive correlation between cocaine overdose deaths and proportion of the population with a bachelors degree or higher ($r = 0.67$).
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(cocaine_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = cocaine_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# compute correlation coefficient between cocaine_rate and bachelors
+c = od_data %>%
+    select(cocaine_rate, bachelors) %>%
+    drop_na()
+cor(c$cocaine_rate, c$bachelors)
+
+```
+
+## Methamphetamine:
+
+There appears to be a moderate-to-weak negative correlation between states' methamphetamine overdose death rates and median household income ($r = -0.45$) and a moderate-to-weak positive correlation between death rates and poverty rate ($r = 0.48$). Omitting a few outliers, no clear relationship can be discerned between methamphetamine overdose deaths and proportion of the population with a high school diploma or higher, but a moderate-to-strong negative relationship appears to exist between the death rate and proportion of the population holding a bachelors degree or higher.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(meth_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = meth_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+# compute correlation coefficient between meth_rate and med_income
+m = od_data %>%
+    select(meth_rate, med_income) %>%
+    drop_na()
+cor(m$meth_rate, m$med_income)
+
+# compute correlation coefficient between meth_rate and poverty
+m = od_data %>%
+    select(meth_rate, poverty) %>%
+    drop_na()
+cor(m$meth_rate, m$poverty)
+
+```
+
+## Benzodiazepines:
+
+Omitting a few outliers, no clear relationship can be discerned between states' drug overdose death rates and median household income, poverty rate, proportion of the population with a high school diploma or higher, or proportion of the population with a bachelor's degree or higher.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+p1 = ggplot(od_data, aes(x = med_income, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Median Income (in thousands)",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Median Income"
+  )
+
+
+p2 = ggplot(od_data, aes(x = poverty, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  labs(
+    x = "Poverty Rate",
+    y = "Overdose Death Rate",
+    title = "Overdose Deaths vs Poverty Rate"
+  )
+
+p1 + p2
+
+
+edu_long = od_data %>%
+  select(benzodiazepines_rate, hs_grad, bachelors) %>%
+  pivot_longer(
+    cols = c(hs_grad, bachelors),
+    names_to = "education_level",
+    values_to = "percent"
+  )
+
+edu_long$education_level = factor(
+  edu_long$education_level,
+  levels = c("hs_grad", "bachelors"),
+  labels = c("High School Diploma or Higher", "Bachelor's Degree or Higher")
+)
+
+ggplot(edu_long, aes(x = percent, y = benzodiazepines_rate)) +
+  geom_point(color = "steelblue") +
+  facet_wrap(~ education_level, scales = "free_x") +
+  labs(
+    x = "Percent of Population",
+    y = "Overdose Death Rate",
+    title = "Overdose Death Rate vs. Educational Attainment"
+  )
+
+```

@@ -1,0 +1,7 @@
+---
+title: "Conclusion"
+---
+
+An important finding of this study is that no single socioeconomic variable consistently explains overdose death rates across all drug types. Instead, each category of drug appears to have its own profile of risk factors for overdose mortality, influenced by an interaction of factors beyond just those included in this study. Thus, studies of and prevention strategies for drug overdose deaths likely need to be tailored to specific substances rather than relying on a single overall approach. This highlights the need for continued research into the predictors of drug overdose rates, be they social, economic, healthcare, behavioral, or other.
+
+In addition, the analysis demonstrates that overdose mortality rates vary significantly across different demographic groups. Our findings indicate that prevention and intervention strategies should consider gender-specific approaches as well as prioritize middle-aged adults.

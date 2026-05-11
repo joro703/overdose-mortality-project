@@ -1,0 +1,31 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: "Overdose Mortality Project"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - Data.qmd
+      - Research Question 1.qmd
+      - Research Question 2.qmd
+      - Research Question 3.qmd
+      - Research Question 4.qmd
+      - Limitations.qmd
+      - Conclusion.qmd
+      - Residual Plots.qmd
+      - R code.qmd
+      - About me.qmd
+
+format:
+  html:
+    theme:
+      - cosmo
+      - brand
+    css: styles.css
+    toc: true
+
+editor: visual
+
